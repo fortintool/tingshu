@@ -8,7 +8,7 @@ class EpubParseResult {
   final String title;
   final String? author;
   final String? coverPath;
-  final List<EpubChapter> chapters;
+  final List<EpubChapterItem> chapters;
   const EpubParseResult({
     required this.title,
     this.author,
@@ -17,10 +17,10 @@ class EpubParseResult {
   });
 }
 
-class EpubChapter {
+class EpubChapterItem {
   final String? title;
   final String content;
-  const EpubChapter({this.title, required this.content});
+  const EpubChapterItem({this.title, required this.content});
 }
 
 class EpubParserService {
@@ -36,14 +36,12 @@ class EpubParserService {
         ? book.AuthorList!.first
         : null;
 
-    // 提取封面
     String? coverPath;
     if (book.CoverImage != null) {
       coverPath = await _saveCover(book.CoverImage!, title);
     }
 
-    // 优先用 TOC 分章，TOC 缺失时遍历 HTML 文件兜底
-    final chapters = await _extractChapters(book);
+    final chapters = _extractChapters(book);
 
     return EpubParseResult(
       title: title,
@@ -59,8 +57,6 @@ class EpubParserService {
       final safeName = title.replaceAll(RegExp(r'[^\w\u4e00-\u9fa5]'), '_');
       final path = p.join(dir.path, 'covers', '${safeName}_cover.png');
       await Directory(p.dirname(path)).create(recursive: true);
-      // epubx 的 CoverImage 是 Image 对象，需要转为 bytes
-      // 注意：不同 epubx 版本的 CoverImage 类型可能不同，这里做运行时判断
       final bytes = _imageToBytes(coverImage);
       if (bytes != null) {
         await File(path).writeAsBytes(bytes);
@@ -71,57 +67,49 @@ class EpubParserService {
   }
 
   static Uint8List? _imageToBytes(Image image) {
-    // 在 dart:ui 的 Image 对象中无法直接获取 PNG bytes，
-    // 这里用 flutter 的 PictureRecorder 方案过重。
-    // 实际 epubx 的 CoverImage 通常是 Image widget 或 Uint8List。
-    // 为简化，我们先返回 null，后续如有真实需求再引入 image 包做编解码。
     return null;
   }
 
-  static Future<List<EpubChapter>> _extractChapters(EpubBook book) async {
-    final toc = book.Schema?.Navigation?.NavPoints;
-    final htmlMap = book.Content?.Html;
+  static List<EpubChapterItem> _extractChapters(EpubBook book) {
+    final result = <EpubChapterItem>[];
 
-    if (toc != null &&
-        toc.isNotEmpty &&
-        htmlMap != null &&
-        htmlMap.isNotEmpty) {
-      // 用 TOC 分章
-      return _extractByToc(toc, htmlMap);
+    if (book.Chapters != null && book.Chapters!.isNotEmpty) {
+      _flattenChapters(book.Chapters!, result);
     }
 
-    // TOC 缺失：遍历所有 HTML 文件，提取正文后按 TXT 逻辑分章
+    if (result.isNotEmpty) {
+      return result;
+    }
+
+    final htmlMap = book.Content?.Html;
     return _extractByHtmlFallback(htmlMap);
   }
 
-  static List<EpubChapter> _extractByToc(
-    List<EpubNavigationPoint> toc,
-    Map<String, EpubTextContentFile> htmlMap,
+  static void _flattenChapters(
+    List<EpubChapter> chapters,
+    List<EpubChapterItem> result,
   ) {
-    final chapters = <EpubChapter>[];
-    for (final point in toc) {
-      final fileName = _extractFileName(point.Content?.Source);
-      if (fileName == null || !htmlMap.containsKey(fileName)) continue;
-
-      final html = htmlMap[fileName]!.Content ?? '';
+    for (final ch in chapters) {
+      final html = ch.HtmlContent ?? '';
       final text = _stripHtml(html);
-      if (text.trim().isEmpty) continue;
-
-      chapters.add(EpubChapter(
-        title: point.NavigationLabels?.first?.Text?.trim(),
-        content: text,
-      ));
+      if (text.trim().isNotEmpty) {
+        result.add(EpubChapterItem(
+          title: ch.Title?.trim(),
+          content: text,
+        ));
+      }
+      if (ch.SubChapters != null && ch.SubChapters!.isNotEmpty) {
+        _flattenChapters(ch.SubChapters!, result);
+      }
     }
-    return chapters;
   }
 
-  static List<EpubChapter> _extractByHtmlFallback(
+  static List<EpubChapterItem> _extractByHtmlFallback(
     Map<String, EpubTextContentFile>? htmlMap,
   ) {
-    final chapters = <EpubChapter>[];
+    final chapters = <EpubChapterItem>[];
     if (htmlMap == null || htmlMap.isEmpty) return chapters;
 
-    // 按文件名排序后拼接所有正文
     final sortedKeys = htmlMap.keys.toList()..sort();
     final buffer = StringBuffer();
     for (final key in sortedKeys) {
@@ -135,7 +123,6 @@ class EpubParserService {
     final fullText = buffer.toString();
     if (fullText.trim().isEmpty) return chapters;
 
-    // 兜底：按正则分章（复用 ChapterSplitter 的逻辑，但这里直接内联简化）
     final pattern = RegExp(
       r'^\s*(第[0-9一二三四五六七八九十百千零]+[章回节]|Chapter\s+\d+).*$',
       multiLine: true,
@@ -148,13 +135,12 @@ class EpubParserService {
         final start = matches[i].start;
         final end = (i + 1 < matches.length) ? matches[i + 1].start : fullText.length;
         final chunk = fullText.substring(start, end).trim();
-        chapters.add(EpubChapter(
+        chapters.add(EpubChapterItem(
           title: matches[i].group(0)?.trim(),
           content: chunk,
         ));
       }
     } else {
-      // 按 3000 字分段
       const fallbackLength = 3000;
       int currentPos = 0;
       int index = 0;
@@ -172,7 +158,7 @@ class EpubParserService {
         }
         final chunk = fullText.substring(currentPos, cutPos).trim();
         if (chunk.isNotEmpty) {
-          chapters.add(EpubChapter(
+          chapters.add(EpubChapterItem(
             title: '第${index + 1}段',
             content: chunk,
           ));
@@ -183,14 +169,6 @@ class EpubParserService {
     }
 
     return chapters;
-  }
-
-  static String? _extractFileName(String? source) {
-    if (source == null) return null;
-    // 去掉锚点
-    final idx = source.indexOf('#');
-    final path = idx == -1 ? source : source.substring(0, idx);
-    return path.trim();
   }
 
   static String _stripHtml(String html) {

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'book_parser.dart';
 
@@ -10,24 +9,24 @@ class ShareImportService {
     required void Function(int bookId) onImported,
     required void Function(String error) onError,
   }) {
-    ReceiveSharingIntent.getInitialMediaAsUri().then((uris) {
-      _handleUris(uris, onImported, onError);
+    ReceiveSharingIntent.instance.getInitialMedia().then((files) {
+      _handleFiles(files, onImported, onError);
     });
 
-    _streamSub = ReceiveSharingIntent.getMediaStreamAsUri().listen(
-      (uris) => _handleUris(uris, onImported, onError),
+    _streamSub = ReceiveSharingIntent.instance.getMediaStream().listen(
+      (files) => _handleFiles(files, onImported, onError),
       onError: (e) => onError('分享接收错误: $e'),
     );
   }
 
-  void _handleUris(
-    List<Uri> uris,
+  void _handleFiles(
+    List<SharedMediaFile> files,
     void Function(int bookId) onImported,
     void Function(String error) onError,
   ) async {
-    if (uris.isEmpty) return;
-    for (final uri in uris) {
-      final path = uri.toFilePath();
+    if (files.isEmpty) return;
+    for (final f in files) {
+      final path = f.path;
       if (path == null || path.isEmpty) continue;
       try {
         final id = await BookParser.instance.importBookFromPath(path);
