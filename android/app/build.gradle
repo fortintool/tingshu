@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace "com.example.tingshu"
-    compileSdkVersion 34
+    compileSdkVersion 35
     ndkVersion flutter.ndkVersion
 
     compileOptions {
