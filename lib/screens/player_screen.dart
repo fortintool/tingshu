@@ -81,7 +81,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       if (mounted) {
         setState(() {
           _currentPosition = progress.chapter;
-          if (progress.chapterId != _currentChapter?.id) {
+          if (_handler.ttsService.currentChapterId != _currentChapter?.id) {
             _refreshCurrentChapter();
           }
         });

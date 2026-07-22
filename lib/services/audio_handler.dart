@@ -45,7 +45,6 @@ class TtsAudioHandler extends BaseAudioHandler {
       artist: book.author ?? '听书',
     );
     playbackState.add(playbackState.value.copyWith(
-      currentMediaItem: item,
       controls: [
         MediaControl.skipToPrevious,
         if (_isPlaying) MediaControl.pause else MediaControl.play,
@@ -101,7 +100,6 @@ class TtsAudioHandler extends BaseAudioHandler {
       artist: _currentBook!.author ?? '听书',
     );
     mediaItem.add(item);
-    playbackState.add(playbackState.value.copyWith(currentMediaItem: item));
     await ttsService.speak(
       text: nextChapter.content,
       bookId: _currentBook!.id!,
@@ -219,10 +217,8 @@ class TtsAudioHandler extends BaseAudioHandler {
     _sessionStartPos = ttsService.currentCharPosition;
   }
 
-  @override
   Future<void> dispose() async {
     await _ttsCompletionSub.cancel();
     await ttsService.stop();
-    await super.dispose();
   }
 }

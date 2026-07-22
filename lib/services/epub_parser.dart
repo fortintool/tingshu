@@ -79,7 +79,7 @@ class EpubParserService {
   }
 
   static Future<List<EpubChapter>> _extractChapters(EpubBook book) async {
-    final toc = book.Schema?.NavigationMap?.NavPoints;
+    final toc = book.Schema?.Navigation?.NavPoints;
     final htmlMap = book.Content?.Html;
 
     if (toc != null &&
@@ -108,7 +108,7 @@ class EpubParserService {
       if (text.trim().isEmpty) continue;
 
       chapters.add(EpubChapter(
-        title: point.NavigationLabel?.Text?.trim(),
+        title: point.NavigationLabels?.first?.Text?.trim(),
         content: text,
       ));
     }
