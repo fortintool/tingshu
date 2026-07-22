@@ -29,3 +29,16 @@ plugins {
 }
 
 include ":app"
+
+// Fix for plugins that don't specify a namespace (required by AGP 8.x)
+gradle.allprojects { project ->
+    project.afterEvaluate {
+        if (project.hasProperty("android")) {
+            project.android {
+                if (namespace == null || namespace.isEmpty()) {
+                    namespace project.group.toString()
+                }
+            }
+        }
+    }
+}
