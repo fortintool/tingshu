@@ -1,3 +1,11 @@
+buildscript {
+    ext.kotlin_version = '1.8.22'
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
 allprojects {
     repositories {
         google()
@@ -10,6 +18,12 @@ rootProject.buildDir = '../build'
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
     project.evaluationDependsOn(':app')
+
+    project.buildscript.configurations.classpath?.resolutionStrategy?.eachDependency {
+        if (requested.group == "org.jetbrains.kotlin") {
+            useVersion("1.8.22")
+        }
+    }
 }
 
 tasks.register("clean", Delete) {
