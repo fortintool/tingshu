@@ -38,6 +38,17 @@ plugins {
 
 include ":app"
 
+// Force Kotlin version for all subprojects (fixes old plugins like pdf_text)
+gradle.beforeProject { project ->
+    project.buildscript.configurations.maybeCreate("classpath")
+    project.buildscript.configurations.classpath.resolutionStrategy.eachDependency {
+        if (requested.group == "org.jetbrains.kotlin") {
+            useVersion("1.8.22")
+        }
+    }
+    project.ext.set("kotlin_version", "1.8.22")
+}
+
 // Fix for plugins that don't specify a namespace (required by AGP 8.x)
 gradle.allprojects { project ->
     project.afterEvaluate {
