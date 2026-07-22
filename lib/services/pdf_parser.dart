@@ -1,6 +1,4 @@
-import 'dart:io';
 import 'package:path/path.dart' as p;
-import 'package:pdf_text/pdf_text.dart';
 import '../utils/chapter_splitter.dart';
 
 class PdfParseResult {
@@ -11,15 +9,8 @@ class PdfParseResult {
 
 class PdfParserService {
   static Future<PdfParseResult> parse(String filePath) async {
-    final doc = await PDFDoc.fromPath(filePath);
-    final text = await doc.text;
-
+    // PDF 暂不支持，待后续替换为可用的 PDF 文本提取库
     final fileName = p.basenameWithoutExtension(filePath);
-    if (text.trim().isEmpty) {
-      return PdfParseResult(title: fileName, chapters: []);
-    }
-
-    final chapters = ChapterSplitter.split(text);
-    return PdfParseResult(title: fileName, chapters: chapters);
+    return PdfParseResult(title: fileName, chapters: []);
   }
 }
