@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:audio_service/audio_service.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'app.dart';
 import 'services/audio_handler.dart';
 import 'services/tts_service.dart';
@@ -8,6 +9,8 @@ import 'providers/audio_handler_provider.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  await _requestNotificationPermission();
 
   // 启动 audio_service 后台服务，handler 是 TTS 适配版本
   final handler = await AudioService.init<TtsAudioHandler>(
@@ -28,4 +31,10 @@ Future<void> main() async {
       child: const TingshuApp(),
     ),
   );
+}
+
+Future<void> _requestNotificationPermission() async {
+  if (await Permission.notification.isDenied) {
+    await Permission.notification.request();
+  }
 }
