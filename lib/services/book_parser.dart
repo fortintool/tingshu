@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import '../database/database_helper.dart';
 import '../models/book.dart';
@@ -19,21 +21,12 @@ class BookParser {
 
   /// 从文件管理器选择并导入书籍（支持 TXT / EPUB）。
   Future<int?> importBook() async {
-    try {
-      if (await Permission.photos.isDenied) {
-        await Permission.photos.request();
-      }
-    } catch (e) {
-      debugPrint('Permission request error: $e');
-    }
-
     FilePickerResult? result;
     try {
       result = await FilePicker.platform.pickFiles(
         type: FileType.any,
-        withData: false,
-        withReadStream: false,
-      );
+        withData: true,
+      ).timeout(const Duration(seconds: 30));
     } catch (e) {
       debugPrint('FilePicker error: $e');
       return null;
@@ -41,18 +34,122 @@ class BookParser {
 
     if (result == null || result.files.isEmpty) return null;
 
-    final file = result.files.first;
-    final path = file.path;
-    if (path == null) return null;
+    final platformFile = result.files.first;
+    final path = platformFile.path;
+    final name = platformFile.name;
+    final ext = p.extension(name).toLowerCase();
 
-    final ext = p.extension(path).toLowerCase();
+    // 优先使用 bytes（兼容 Android content:// URI 场景）
+    final bytes = platformFile.bytes;
+
     if (ext == '.epub') {
-      return importEpubFromPath(path);
+      if (bytes != null) {
+        final tempPath = await _saveTempFile(name, bytes);
+        if (tempPath != null) return importEpubFromPath(tempPath);
+      }
+      if (path != null) return importEpubFromPath(path);
+      return null;
     }
     if (ext == '.pdf') {
-      return importPdfFromPath(path);
+      if (bytes != null) {
+        final tempPath = await _saveTempFile(name, bytes);
+        if (tempPath != null) return importPdfFromPath(tempPath);
+      }
+      if (path != null) return importPdfFromPath(path);
+      return null;
     }
-    return importTxtFromPath(path);
+
+    // TXT：优先用 bytes 直接解码，避免 content:// URI 无法读取
+    if (bytes != null) {
+      String content;
+      try {
+        content = utf8.decode(bytes);
+      } catch (_) {
+        content = latin1.decode(bytes);
+      }
+      if (content.trim().isEmpty) return null;
+      return _importTxtContent(p.basenameWithoutExtension(name), content, path);
+    }
+
+    if (path != null) return importTxtFromPath(path);
+    return null;
+  }
+
+  /// 将 bytes 写入临时目录，返回临时文件路径。
+  Future<String?> _saveTempFile(String fileName, Uint8List bytes) async {
+    try {
+      final dir = await getTemporaryDirectory();
+      final tempPath = p.join(
+        dir.path,
+        'import_${DateTime.now().millisecondsSinceEpoch}_$fileName',
+      );
+      await File(tempPath).writeAsBytes(bytes);
+      return tempPath;
+    } catch (e) {
+      debugPrint('_saveTempFile error: $e');
+      return null;
+    }
+  }
+
+  /// TXT 导入核心逻辑：直接传入已解码的文本内容。
+  Future<int?> _importTxtContent(String fileName, String content, String? filePath) async {
+    try {
+      // 自动分章
+      final splitResults = ChapterSplitter.split(content);
+
+      final now = DateTime.now().millisecondsSinceEpoch;
+
+      // 插入书籍记录
+      final book = Book(
+        title: fileName,
+        filePath: filePath ?? '',
+        fileType: 'txt',
+        totalChars: content.length,
+        createdAt: now,
+        updatedAt: now,
+      );
+      final bookId = await _db.insertBook(book);
+
+      // 构建章节对象并批量插入
+      final chapters = <Chapter>[];
+      int globalCharStart = 0;
+      for (int i = 0; i < splitResults.length; i++) {
+        final r = splitResults[i];
+        final chapterContent = r.content;
+        final charStart = globalCharStart;
+        final charEnd = globalCharStart + chapterContent.length;
+        chapters.add(Chapter(
+          bookId: bookId,
+          title: r.title,
+          content: chapterContent,
+          charStart: charStart,
+          charEnd: charEnd,
+          chapterIndex: i,
+          createdAt: now,
+        ));
+        globalCharStart = charEnd;
+      }
+
+      await _db.insertChaptersBatch(chapters);
+
+      // 查询插入后的章节以获取真实 id
+      final savedChapters = await _db.getChaptersByBook(bookId);
+      if (savedChapters.isEmpty) return bookId;
+
+      // 初始化默认进度（第一章开头）
+      final firstChapter = savedChapters.first;
+      await _db.upsertProgress(ReadingProgress(
+        bookId: bookId,
+        chapterId: firstChapter.id!,
+        charPosition: 0,
+        updatedAt: now,
+      ));
+
+      return bookId;
+    } catch (e, st) {
+      debugPrint('_importTxtContent error: $e\n$st');
+      return null;
+    }
   }
 
   /// 根据扩展名自动路由到对应解析器（用于分享导入）。
@@ -65,66 +162,27 @@ class BookParser {
 
   /// 从给定路径导入 TXT（也用于接收分享的场景）。
   Future<int?> importTxtFromPath(String filePath) async {
-    final file = File(filePath);
-    if (!await file.exists()) return null;
+    try {
+      final file = File(filePath);
+      if (!await file.exists()) return null;
 
-    final fileName = p.basenameWithoutExtension(filePath);
-    final content = await file.readAsString();
+      final fileName = p.basenameWithoutExtension(filePath);
 
-    if (content.trim().isEmpty) return null;
+      // 编码容错：优先 UTF-8，失败则用 latin1 兜底（避免 GBK 文件抛异常导致崩溃）
+      final bytes = await file.readAsBytes();
+      String content;
+      try {
+        content = utf8.decode(bytes);
+      } catch (_) {
+        content = latin1.decode(bytes);
+      }
 
-    // 自动分章
-    final splitResults = ChapterSplitter.split(content);
-
-    final now = DateTime.now().millisecondsSinceEpoch;
-
-    // 插入书籍记录
-    final book = Book(
-      title: fileName,
-      filePath: filePath,
-      fileType: 'txt',
-      totalChars: content.length,
-      createdAt: now,
-      updatedAt: now,
-    );
-    final bookId = await _db.insertBook(book);
-
-    // 构建章节对象并批量插入
-    final chapters = <Chapter>[];
-    int globalCharStart = 0;
-    for (int i = 0; i < splitResults.length; i++) {
-      final r = splitResults[i];
-      final chapterContent = r.content;
-      final charStart = globalCharStart;
-      final charEnd = globalCharStart + chapterContent.length;
-      chapters.add(Chapter(
-        bookId: bookId,
-        title: r.title,
-        content: chapterContent,
-        charStart: charStart,
-        charEnd: charEnd,
-        chapterIndex: i,
-        createdAt: now,
-      ));
-      globalCharStart = charEnd;
+      if (content.trim().isEmpty) return null;
+      return _importTxtContent(fileName, content, filePath);
+    } catch (e, st) {
+      debugPrint('importTxtFromPath error: $e\n$st');
+      return null;
     }
-
-    await _db.insertChaptersBatch(chapters);
-
-    // 查询插入后的章节以获取真实 id
-    final savedChapters = await _db.getChaptersByBook(bookId);
-    if (savedChapters.isEmpty) return bookId;
-
-    // 初始化默认进度（第一章开头）
-    final firstChapter = savedChapters.first;
-    await _db.upsertProgress(ReadingProgress(
-      bookId: bookId,
-      chapterId: firstChapter.id!,
-      charPosition: 0,
-      updatedAt: now,
-    ));
-
-    return bookId;
   }
 
   /// 从给定路径导入 EPUB。

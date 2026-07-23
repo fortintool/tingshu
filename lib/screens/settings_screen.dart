@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/settings_provider.dart';
@@ -21,12 +22,40 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _loadVoices() async {
-    final list = await TtsService.instance.getVoices();
-    if (mounted) {
-      setState(() {
-        _voices = list;
-        _loadingVoices = false;
-      });
+    if (!mounted) return;
+    setState(() => _loadingVoices = true);
+
+    Timer? timer;
+    bool completed = false;
+
+    // Timer 双保险：即使 platform channel 阻塞，2 秒后也强制恢复 UI
+    timer = Timer(const Duration(seconds: 2), () {
+      if (!completed && mounted) {
+        setState(() {
+          _loadingVoices = false;
+          _voices = [];
+        });
+      }
+      completed = true;
+    });
+
+    try {
+      final list = await TtsService.instance.getVoices();
+      if (!completed && mounted) {
+        timer.cancel();
+        setState(() {
+          _voices = list;
+          _loadingVoices = false;
+        });
+      }
+      completed = true;
+    } catch (e) {
+      debugPrint('_loadVoices error: $e');
+      if (!completed && mounted) {
+        timer.cancel();
+        setState(() => _loadingVoices = false);
+      }
+      completed = true;
     }
   }
 
@@ -45,7 +74,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _loadingVoices
               ? const Center(child: CircularProgressIndicator())
               : _voices.isEmpty
-                  ? const Text('无法获取语音列表')
+                  ? Row(
+                      children: [
+                        const Expanded(child: Text('无法获取语音列表')),
+                        TextButton.icon(
+                          onPressed: _loadVoices,
+                          icon: const Icon(Icons.refresh, size: 18),
+                          label: const Text('重试'),
+                        ),
+                      ],
+                    )
                   : Card(
                       child: ListTile(
                         title: Text(_voiceDisplayName(settings.defaultVoice)),

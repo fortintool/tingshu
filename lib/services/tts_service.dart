@@ -106,9 +106,8 @@ class TtsService {
   /// 获取设备支持的语音列表
   Future<List<Map<String, String>>> getVoices() async {
     try {
-      await tts.setLanguage('zh-CN');
       final list = await tts.getVoices.timeout(
-        const Duration(seconds: 5),
+        const Duration(seconds: 3),
         onTimeout: () => <dynamic>[],
       );
       if (list is List) {

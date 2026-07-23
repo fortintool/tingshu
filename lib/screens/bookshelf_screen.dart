@@ -56,20 +56,29 @@ class _BookshelfScreenState extends ConsumerState<BookshelfScreen> {
   }
 
   Future<void> _importBook() async {
-    final id = await BookParser.instance.importBook();
-    if (id == null) {
+    try {
+      final id = await BookParser.instance.importBook();
+      if (id == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('导入失败或未选择文件')),
+          );
+        }
+        return;
+      }
+      await ref.read(bookshelfProvider.notifier).load();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('导入失败或未选择文件')),
+          const SnackBar(content: Text('导入成功')),
         );
       }
-      return;
-    }
-    await ref.read(bookshelfProvider.notifier).load();
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('导入成功')),
-      );
+    } catch (e) {
+      debugPrint('_importBook error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('导入出错: $e')),
+        );
+      }
     }
   }
 
