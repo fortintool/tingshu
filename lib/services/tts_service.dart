@@ -42,32 +42,42 @@ class TtsService {
   Stream<void> get completionStream => _completionController.stream;
 
   bool _initialized = false;
+  bool _initFailed = false;
 
   Future<void> _ensureInit() async {
     if (_initialized) return;
-    await tts.awaitSpeakCompletion(true);
-    tts.setStartHandler(() {
-      // Android 上设置 progress 监听
-      tts.setProgressHandler((String text, int start, int end, String word) {
-        // end 是当前词在原文中的结束位置
-        // 加上章节起始偏移，换算到全书坐标
-        _currentCharPosition = end;
-        _progressController.add((
-          chapter: end,
-          book: _chapterCharStart + end,
-        ));
+    if (_initFailed) return;
+    
+    try {
+      await tts.setLanguage('zh-CN');
+      await tts.awaitSpeakCompletion(true);
+      await tts.setSpeechRate(1.0);
+      await tts.setPitch(1.0);
+      
+      tts.setStartHandler(() {
+        tts.setProgressHandler((String text, int start, int end, String word) {
+          _currentCharPosition = end;
+          _progressController.add((
+            chapter: end,
+            book: _chapterCharStart + end,
+          ));
+        });
       });
-    });
-    tts.setCompletionHandler(() {
-      _completionController.add(null);
-    });
-    tts.setErrorHandler((msg) {
-      _completionController.add(null);
-    });
-    tts.setCancelHandler(() {
-      // 用户主动取消时也通知一次
-    });
-    _initialized = true;
+      tts.setCompletionHandler(() {
+        _completionController.add(null);
+      });
+      tts.setErrorHandler((msg) {
+        debugPrint('TTS error: $msg');
+        _completionController.add(null);
+      });
+      tts.setCancelHandler(() {});
+      
+      _initialized = true;
+      debugPrint('TTS initialized successfully');
+    } catch (e) {
+      _initFailed = true;
+      debugPrint('TTS init failed: $e');
+    }
   }
 
   /// 应用设置（单本书覆盖全局）
@@ -96,6 +106,7 @@ class TtsService {
   /// 获取设备支持的语音列表
   Future<List<Map<String, String>>> getVoices() async {
     try {
+      await tts.setLanguage('zh-CN');
       final list = await tts.getVoices.timeout(
         const Duration(seconds: 5),
         onTimeout: () => <dynamic>[],

@@ -187,6 +187,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final tts = TtsService.instance;
     try {
       await tts.stop();
+      await tts.tts.setLanguage('zh-CN');
       await tts.tts.setSpeechRate(settings.defaultSpeed);
       await tts.tts.setPitch(settings.defaultPitch);
       final voice = settings.defaultVoice;

@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:path/path.dart' as p;
 import '../database/database_helper.dart';
 import '../models/book.dart';
@@ -18,6 +19,14 @@ class BookParser {
 
   /// 从文件管理器选择并导入书籍（支持 TXT / EPUB）。
   Future<int?> importBook() async {
+    try {
+      if (await Permission.photos.isDenied) {
+        await Permission.photos.request();
+      }
+    } catch (e) {
+      debugPrint('Permission request error: $e');
+    }
+
     FilePickerResult? result;
     try {
       result = await FilePicker.platform.pickFiles(
