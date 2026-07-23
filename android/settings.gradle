@@ -38,6 +38,11 @@ gradle.allprojects { project ->
                 if (namespace == null || namespace.isEmpty()) {
                     namespace project.group.toString()
                 }
+                // Force Java 17 for all subprojects (required for Kotlin 1.8+)
+                compileOptions {
+                    sourceCompatibility JavaVersion.VERSION_17
+                    targetCompatibility JavaVersion.VERSION_17
+                }
             }
         }
     }
