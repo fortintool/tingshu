@@ -189,8 +189,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       await tts.stop();
       await tts.tts.setSpeechRate(settings.defaultSpeed);
       await tts.tts.setPitch(settings.defaultPitch);
-      if (settings.defaultVoice != null && settings.defaultVoice!.isNotEmpty) {
-        await tts.tts.setVoice({'name': settings.defaultVoice, 'locale': settings.defaultVoice});
+      final voice = settings.defaultVoice;
+      if (voice != null && voice.isNotEmpty) {
+        await tts.tts.setVoice({'name': voice, 'locale': voice});
       }
       await tts.tts.speak('这是一段测试语音，用于试听当前设置的发音人、语速和音调效果。');
     } catch (e) {
