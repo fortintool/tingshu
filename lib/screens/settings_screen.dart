@@ -222,15 +222,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final settings = ref.read(settingsProvider);
     final tts = TtsService.instance;
     try {
-      await tts.stop();
-      await tts.tts.setLanguage('zh-CN');
-      await tts.tts.setSpeechRate(settings.defaultSpeed);
-      await tts.tts.setPitch(settings.defaultPitch);
-      final voice = settings.defaultVoice;
-      if (voice != null && voice.isNotEmpty) {
-        await tts.tts.setVoice({'name': voice, 'locale': voice});
-      }
-      await tts.tts.speak('这是一段测试语音，用于试听当前设置的发音人、语速和音调效果。');
+      await tts.speak(
+        text: '这是一段测试语音，用于试听当前设置的发音人、语速和音调效果。',
+        bookId: 0,
+        chapterId: 0,
+        chapterCharStart: 0,
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

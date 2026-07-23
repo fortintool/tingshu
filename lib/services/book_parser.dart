@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:charset/charset.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
@@ -18,6 +19,39 @@ class BookParser {
   BookParser._init();
 
   final _db = DatabaseHelper.instance;
+
+  /// 自动检测编码并解码 bytes 为字符串。
+  /// 优先 UTF-8，然后尝试 GBK，最后用 latin1 兜底。
+  String _decodeBytes(List<int> bytes) {
+    // 1. 先试 UTF-8（allowMalformed 让它尽量解码不抛异常）
+    try {
+      final utf8Str = utf8.decode(bytes, allowMalformed: false);
+      // 检查是否有替换字符（U+FFFD），如果很少可能就是 UTF-8
+      final replacementCount = utf8Str.runes.where((r) => r == 0xFFFD).length;
+      if (replacementCount == 0 || replacementCount / utf8Str.length < 0.01) {
+        return utf8Str;
+      }
+    } catch (_) {}
+
+    // 2. 尝试 GBK
+    try {
+      final gbkStr = gbk.decode(bytes);
+      if (gbkStr.isNotEmpty) {
+        return gbkStr;
+      }
+    } catch (_) {}
+
+    // 3. 尝试 GB18030（GBK 的超集）
+    try {
+      final gb18030Str = Charset.fromName('GB18030')?.decode(bytes) ?? '';
+      if (gb18030Str.isNotEmpty) {
+        return gb18030Str;
+      }
+    } catch (_) {}
+
+    // 4. 最后兜底：UTF-8 with allowMalformed
+    return utf8.decode(bytes, allowMalformed: true);
+  }
 
   /// 从文件管理器选择并导入书籍（支持 TXT / EPUB）。
   Future<int?> importBook() async {
@@ -61,12 +95,7 @@ class BookParser {
 
     // TXT：优先用 bytes 直接解码，避免 content:// URI 无法读取
     if (bytes != null) {
-      String content;
-      try {
-        content = utf8.decode(bytes);
-      } catch (_) {
-        content = latin1.decode(bytes);
-      }
+      final content = _decodeBytes(bytes);
       if (content.trim().isEmpty) return null;
       return _importTxtContent(p.basenameWithoutExtension(name), content, path);
     }
@@ -167,15 +196,8 @@ class BookParser {
       if (!await file.exists()) return null;
 
       final fileName = p.basenameWithoutExtension(filePath);
-
-      // 编码容错：优先 UTF-8，失败则用 latin1 兜底（避免 GBK 文件抛异常导致崩溃）
       final bytes = await file.readAsBytes();
-      String content;
-      try {
-        content = utf8.decode(bytes);
-      } catch (_) {
-        content = latin1.decode(bytes);
-      }
+      final content = _decodeBytes(bytes);
 
       if (content.trim().isEmpty) return null;
       return _importTxtContent(fileName, content, filePath);
