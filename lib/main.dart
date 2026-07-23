@@ -12,21 +12,26 @@ Future<void> main() async {
 
   await _requestNotificationPermission();
 
-  // 启动 audio_service 后台服务，handler 是 TTS 适配版本
-  final handler = await AudioService.init<TtsAudioHandler>(
-    builder: () => TtsAudioHandler(ttsService: TtsService.instance),
-    config: const AudioServiceConfig(
-      androidNotificationChannelId: 'com.tingshu.audio',
-      androidNotificationChannelName: '听书播放',
-      androidNotificationOngoing: true,
-      androidStopForegroundOnPause: true,
-    ),
-  );
+  TtsAudioHandler? handler;
+  try {
+    handler = await AudioService.init<TtsAudioHandler>(
+      builder: () => TtsAudioHandler(ttsService: TtsService.instance),
+      config: const AudioServiceConfig(
+        androidNotificationChannelId: 'com.tingshu.audio',
+        androidNotificationChannelName: '听书播放',
+        androidNotificationOngoing: true,
+        androidStopForegroundOnPause: true,
+      ),
+    );
+  } catch (e, st) {
+    debugPrint('AudioService.init failed: $e\n$st');
+  }
 
   runApp(
     ProviderScope(
       overrides: [
-        audioHandlerProvider.overrideWithValue(handler),
+        if (handler != null)
+          audioHandlerProvider.overrideWithValue(handler),
       ],
       child: const TingshuApp(),
     ),
