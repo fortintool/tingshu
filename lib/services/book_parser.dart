@@ -32,7 +32,7 @@ class BookParser {
       }
     } catch (_) {}
 
-    // 2. 尝试 GBK
+    // 2. 尝试 GBK（兼容 GB2312）
     try {
       final gbkStr = gbk.decode(bytes);
       if (gbkStr.isNotEmpty) {
@@ -40,15 +40,7 @@ class BookParser {
       }
     } catch (_) {}
 
-    // 3. 尝试 GB18030（GBK 超集）
-    try {
-      final gb18030Str = gb18030.decode(bytes);
-      if (gb18030Str.isNotEmpty) {
-        return gb18030Str;
-      }
-    } catch (_) {}
-
-    // 4. 最后兜底：UTF-8 with allowMalformed
+    // 3. 最后兜底：UTF-8 with allowMalformed
     return utf8.decode(bytes, allowMalformed: true);
   }
 
