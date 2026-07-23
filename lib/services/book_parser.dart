@@ -23,10 +23,9 @@ class BookParser {
   /// 自动检测编码并解码 bytes 为字符串。
   /// 优先 UTF-8，然后尝试 GBK，最后用 latin1 兜底。
   String _decodeBytes(List<int> bytes) {
-    // 1. 先试 UTF-8（allowMalformed 让它尽量解码不抛异常）
+    // 1. 先试 UTF-8
     try {
       final utf8Str = utf8.decode(bytes, allowMalformed: false);
-      // 检查是否有替换字符（U+FFFD），如果很少可能就是 UTF-8
       final replacementCount = utf8Str.runes.where((r) => r == 0xFFFD).length;
       if (replacementCount == 0 || replacementCount / utf8Str.length < 0.01) {
         return utf8Str;
@@ -41,9 +40,9 @@ class BookParser {
       }
     } catch (_) {}
 
-    // 3. 尝试 GB18030（GBK 的超集）
+    // 3. 尝试 GB18030（GBK 超集）
     try {
-      final gb18030Str = Charset.fromName('GB18030')?.decode(bytes) ?? '';
+      final gb18030Str = gb18030.decode(bytes);
       if (gb18030Str.isNotEmpty) {
         return gb18030Str;
       }
