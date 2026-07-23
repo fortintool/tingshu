@@ -34,40 +34,44 @@ class TtsAudioHandler extends BaseAudioHandler {
     required Chapter chapter,
     int startOffset = 0,
   }) async {
-    _currentBook = book;
-    _currentChapter = chapter;
+    try {
+      _currentBook = book;
+      _currentChapter = chapter;
 
-    // 更新媒体通知
-    final item = MediaItem(
-      id: 'book-${book.id}-chapter-${chapter.id}',
-      album: book.title,
-      title: chapter.title ?? '未命名章节',
-      artist: book.author ?? '听书',
-    );
-    playbackState.add(playbackState.value.copyWith(
-      controls: [
-        MediaControl.skipToPrevious,
-        if (_isPlaying) MediaControl.pause else MediaControl.play,
-        MediaControl.stop,
-        MediaControl.skipToNext,
-      ],
-      systemActions: const {
-        MediaAction.seek,
-      },
-      playing: true,
-      processingState: AudioProcessingState.ready,
-    ));
-    mediaItem.add(item);
+      // 更新媒体通知
+      final item = MediaItem(
+        id: 'book-${book.id}-chapter-${chapter.id}',
+        album: book.title,
+        title: chapter.title ?? '未命名章节',
+        artist: book.author ?? '听书',
+      );
+      playbackState.add(playbackState.value.copyWith(
+        controls: [
+          MediaControl.skipToPrevious,
+          if (_isPlaying) MediaControl.pause else MediaControl.play,
+          MediaControl.stop,
+          MediaControl.skipToNext,
+        ],
+        systemActions: const {
+          MediaAction.seek,
+        },
+        playing: true,
+        processingState: AudioProcessingState.ready,
+      ));
+      mediaItem.add(item);
 
-    await ttsService.speak(
-      text: chapter.content,
-      bookId: book.id!,
-      chapterId: chapter.id!,
-      chapterCharStart: chapter.charStart,
-      startOffset: startOffset,
-    );
-    _isPlaying = true;
-    _updatePlayingState(true);
+      await ttsService.speak(
+        text: chapter.content,
+        bookId: book.id!,
+        chapterId: chapter.id!,
+        chapterCharStart: chapter.charStart,
+        startOffset: startOffset,
+      );
+      _isPlaying = true;
+      _updatePlayingState(true);
+    } catch (e, st) {
+      debugPrint('playChapter error: $e\n$st');
+    }
   }
 
   void _updatePlayingState(bool playing) {

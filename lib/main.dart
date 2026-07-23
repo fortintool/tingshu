@@ -30,8 +30,7 @@ Future<void> main() async {
   runApp(
     ProviderScope(
       overrides: [
-        if (handler != null)
-          audioHandlerProvider.overrideWithValue(handler),
+        audioHandlerProvider.overrideWithValue(handler),
       ],
       child: const TingshuApp(),
     ),

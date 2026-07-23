@@ -49,10 +49,10 @@ class TtsService {
     if (_initFailed) return;
     
     try {
-      await tts.setLanguage('zh-CN');
-      await tts.awaitSpeakCompletion(true);
-      await tts.setSpeechRate(1.0);
-      await tts.setPitch(1.0);
+      await tts.setLanguage('zh-CN').timeout(const Duration(seconds: 2));
+      await tts.awaitSpeakCompletion(true).timeout(const Duration(seconds: 1));
+      await tts.setSpeechRate(1.0).timeout(const Duration(seconds: 1));
+      await tts.setPitch(1.0).timeout(const Duration(seconds: 1));
       
       tts.setStartHandler(() {
         tts.setProgressHandler((String text, int start, int end, String word) {
@@ -133,27 +133,32 @@ class TtsService {
     required int chapterCharStart,
     int startOffset = 0,
   }) async {
-    await _ensureInit();
-    await stop();
+    try {
+      await _ensureInit();
+      await stop();
 
-    _currentText = text;
-    _chapterCharStart = chapterCharStart;
-    _currentCharPosition = startOffset;
-    _currentBookId = bookId;
-    _currentChapterId = chapterId;
+      _currentText = text;
+      _chapterCharStart = chapterCharStart;
+      _currentCharPosition = startOffset;
+      _currentBookId = bookId;
+      _currentChapterId = chapterId;
 
-    await _applySettings(bookId);
+      await _applySettings(bookId);
 
-    final subText = startOffset > 0 && startOffset < text.length
-        ? text.substring(startOffset)
-        : text;
+      final subText = startOffset > 0 && startOffset < text.length
+          ? text.substring(startOffset)
+          : text;
 
-    if (subText.trim().isEmpty) {
+      if (subText.trim().isEmpty) {
+        _completionController.add(null);
+        return;
+      }
+
+      await tts.speak(subText).timeout(const Duration(seconds: 5));
+    } catch (e, st) {
+      debugPrint('TTS speak error: $e\n$st');
       _completionController.add(null);
-      return;
     }
-
-    await tts.speak(subText);
   }
 
   Future<void> pause() async {
