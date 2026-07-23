@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import '../models/app_settings.dart';
 import '../database/database_helper.dart';
@@ -94,13 +95,19 @@ class TtsService {
 
   /// 获取设备支持的语音列表
   Future<List<Map<String, String>>> getVoices() async {
-    await _ensureInit();
-    final list = await tts.getVoices;
-    if (list is List) {
-      return list
-          .whereType<Map>()
-          .map((e) => e.map((k, v) => MapEntry(k.toString(), v.toString())))
-          .toList();
+    try {
+      final list = await tts.getVoices.timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => <dynamic>[],
+      );
+      if (list is List) {
+        return list
+            .whereType<Map>()
+            .map((e) => e.map((k, v) => MapEntry(k.toString(), v.toString())))
+            .toList();
+      }
+    } catch (e) {
+      debugPrint('getVoices error: $e');
     }
     return [];
   }

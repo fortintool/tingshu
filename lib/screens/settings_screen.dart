@@ -183,13 +183,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _testSpeak() async {
+    final settings = ref.read(settingsProvider);
     final tts = TtsService.instance;
-    await tts.speak(
-      text: '这是一段测试语音，用于试听当前设置的发音人、语速和音调效果。',
-      bookId: -1, // 测试用特殊 ID
-      chapterId: -1,
-      chapterCharStart: 0,
-    );
+    try {
+      await tts.stop();
+      await tts.tts.setSpeechRate(settings.defaultSpeed);
+      await tts.tts.setPitch(settings.defaultPitch);
+      if (settings.defaultVoice != null && settings.defaultVoice!.isNotEmpty) {
+        await tts.tts.setVoice({'name': settings.defaultVoice, 'locale': settings.defaultVoice});
+      }
+      await tts.tts.speak('这是一段测试语音，用于试听当前设置的发音人、语速和音调效果。');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('测试失败: $e')),
+        );
+      }
+    }
   }
 }
 

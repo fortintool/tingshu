@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import '../database/database_helper.dart';
 import '../models/book.dart';
@@ -17,12 +18,17 @@ class BookParser {
 
   /// 从文件管理器选择并导入书籍（支持 TXT / EPUB）。
   Future<int?> importBook() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['txt', 'epub', 'pdf'],
-      withData: false,
-      withReadStream: false,
-    );
+    FilePickerResult? result;
+    try {
+      result = await FilePicker.platform.pickFiles(
+        type: FileType.any,
+        withData: false,
+        withReadStream: false,
+      );
+    } catch (e) {
+      debugPrint('FilePicker error: $e');
+      return null;
+    }
 
     if (result == null || result.files.isEmpty) return null;
 
