@@ -17,7 +17,7 @@ import '../providers/audio_handler_provider.dart';
 class ProgressSaver {
   ProgressSaver({required this.handler, required this.ttsService});
 
-  final TtsAudioHandler handler;
+  final TtsAudioHandler? handler;
   final TtsService ttsService;
   final DatabaseHelper _db = DatabaseHelper.instance;
 
@@ -47,7 +47,7 @@ class ProgressSaver {
     if (_isSaving) return;
     _isSaving = true;
     try {
-      await handler.flushProgress();
+      await handler?.flushProgress();
     } catch (_) {
       // 静默失败，避免打断播放
     } finally {

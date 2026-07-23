@@ -41,6 +41,14 @@ class _ChapterListScreenState extends ConsumerState<ChapterListScreen> {
 
   Future<void> _selectChapter(Chapter chapter) async {
     final handler = ref.read(audioHandlerProvider);
+    if (handler == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('音频服务不可用')),
+        );
+      }
+      return;
+    }
     await handler.playChapter(
       book: widget.book,
       chapter: chapter,
