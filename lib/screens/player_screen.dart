@@ -3,10 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/book.dart';
 import '../models/chapter.dart';
-import '../services/audio_handler.dart';
 import '../services/tts_service.dart';
 import '../database/database_helper.dart';
-import '../providers/audio_handler_provider.dart';
 import '../providers/player_provider.dart';
 import '../providers/book_settings_provider.dart';
 import '../providers/settings_provider.dart';
@@ -30,147 +28,177 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   int _currentPosition = 0;
   ScrollController? _textScrollController;
 
-  TtsAudioHandler? _handler;
-  bool _audioHandlerAvailable = true;
+  StreamSubscription? _progressSub;
+  StreamSubscription? _completionSub;
 
   @override
   void initState() {
     super.initState();
     _textScrollController = ScrollController();
-    _initScreen();
-    _subscribeProgress();
-  }
-
-  Future<void> _initScreen() async {
-    try {
-      _handler = ref.read(audioHandlerProvider);
-    } catch (_) {
-      _audioHandlerAvailable = false;
-      setState(() {});
-      return;
-    }
-
-    try {
-      await _loadAndPlay();
-    } catch (e, st) {
-      debugPrint('PlayerScreen _loadAndPlay error: $e\n$st');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('加载失败: $e')),
-        );
-      }
-    }
+    _loadAndPlay();
+    _subscribeStreams();
   }
 
   Future<void> _loadAndPlay() async {
-    if (_handler == null) return;
+    try {
+      final db = DatabaseHelper.instance;
+      final bookId = widget.book.id!;
 
-    final db = DatabaseHelper.instance;
+      final progress = await db.getProgress(bookId);
+      int startChapterId;
+      int startCharPos;
+      if (progress != null) {
+        startChapterId = progress.chapterId;
+        startCharPos = progress.charPosition;
+      } else {
+        final chapters = await db.getChaptersByBook(bookId);
+        if (chapters.isEmpty) return;
+        startChapterId = chapters.first.id!;
+        startCharPos = 0;
+      }
 
-    final progress = await db.getProgress(widget.book.id!);
-    int startChapterId;
-    int startCharPos;
-    if (progress != null) {
-      startChapterId = progress.chapterId;
-      startCharPos = progress.charPosition;
-    } else {
-      final chapters = await db.getChaptersByBook(widget.book.id!);
-      if (chapters.isEmpty) return;
-      startChapterId = chapters.first.id!;
-      startCharPos = 0;
+      final chapter = await db.getChapter(startChapterId);
+      if (chapter == null) return;
+
+      if (mounted) {
+        setState(() {
+          _currentChapter = chapter;
+          _currentPosition = startCharPos;
+        });
+      }
+
+      await _playChapter(chapter, startCharPos);
+    } catch (e, st) {
+      debugPrint('PlayerScreen _loadAndPlay error: $e\n$st');
     }
-
-    final chapter = await db.getChapter(startChapterId);
-    if (chapter == null) return;
-    setState(() {
-      _currentChapter = chapter;
-      _currentPosition = startCharPos;
-    });
-
-    await _handler!.playChapter(
-      book: widget.book,
-      chapter: chapter,
-      startOffset: startCharPos,
-    );
-    setState(() => _isPlaying = true);
-    _handler!.onPlaybackStart();
-    ref.read(playerStateProvider.notifier).setPlaying(
-          book: widget.book,
-          chapter: chapter,
-          isPlaying: true,
-        );
   }
 
-  void _subscribeProgress() {
-    TtsService.instance.progressStream.listen((progress) {
+  void _subscribeStreams() {
+    _progressSub = TtsService.instance.progressStream.listen((progress) {
       if (mounted) {
         setState(() {
           _currentPosition = progress.chapter;
-          if (_handler?.ttsService.currentChapterId != _currentChapter?.id) {
-            _refreshCurrentChapter();
-          }
         });
       }
     });
+
+    _completionSub = TtsService.instance.completionStream.listen((_) {
+      _onChapterComplete();
+    });
   }
 
-  Future<void> _refreshCurrentChapter() async {
-    if (_handler == null) return;
-    final id = _handler!.ttsService.currentChapterId;
-    if (id == null) return;
-    final ch = await DatabaseHelper.instance.getChapter(id);
-    if (mounted && ch != null) {
-      setState(() {
-        _currentChapter = ch;
-        _currentPosition = 0;
-      });
-      Future.delayed(const Duration(milliseconds: 100), () {
-        _textScrollController?.jumpTo(0);
-      });
+  Future<void> _playChapter(Chapter chapter, int startOffset) async {
+    try {
+      await TtsService.instance.speak(
+        text: chapter.content,
+        bookId: widget.book.id!,
+        chapterId: chapter.id!,
+        chapterCharStart: chapter.charStart,
+        startOffset: startOffset,
+      );
+      if (mounted) {
+        setState(() => _isPlaying = true);
+        ref.read(playerStateProvider.notifier).setPlaying(
+              book: widget.book,
+              chapter: chapter,
+              isPlaying: true,
+            );
+      }
+    } catch (e) {
+      debugPrint('_playChapter error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('播放失败: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _onChapterComplete() async {
+    if (_currentChapter == null) return;
+    try {
+      final nextIdx = _currentChapter!.chapterIndex + 1;
+      final next = await DatabaseHelper.instance.getChapterByIndex(
+        widget.book.id!,
+        nextIdx,
+      );
+      if (next == null) {
+        if (mounted) setState(() => _isPlaying = false);
+        return;
+      }
+      if (mounted) {
+        setState(() {
+          _currentChapter = next;
+          _currentPosition = 0;
+        });
+      }
+      await _playChapter(next, 0);
+    } catch (e) {
+      debugPrint('_onChapterComplete error: $e');
     }
   }
 
   Future<void> _togglePlay() async {
-    if (_handler == null) {
-      _showAudioNotAvailable();
-      return;
+    try {
+      if (_isPlaying) {
+        await TtsService.instance.pause();
+        if (mounted) setState(() => _isPlaying = false);
+      } else {
+        if (_currentChapter == null) return;
+        final pos = TtsService.instance.currentCharPosition;
+        await _playChapter(_currentChapter!, pos);
+      }
+      ref.read(playerStateProvider.notifier).setPlaying(
+            book: widget.book,
+            chapter: _currentChapter,
+            isPlaying: _isPlaying,
+          );
+    } catch (e) {
+      debugPrint('_togglePlay error: $e');
     }
-    if (_isPlaying) {
-      await _handler!.pause();
-      setState(() => _isPlaying = false);
-    } else {
-      await _handler!.play();
-      setState(() => _isPlaying = true);
-    }
-    ref.read(playerStateProvider.notifier).setPlaying(
-          book: widget.book,
-          chapter: _currentChapter,
-          isPlaying: _isPlaying,
-        );
   }
 
   Future<void> _nextChapter() async {
-    if (_handler == null) {
-      _showAudioNotAvailable();
-      return;
+    if (_currentChapter == null) return;
+    try {
+      final nextIdx = _currentChapter!.chapterIndex + 1;
+      final next = await DatabaseHelper.instance.getChapterByIndex(
+        widget.book.id!,
+        nextIdx,
+      );
+      if (next == null) return;
+      if (mounted) {
+        setState(() {
+          _currentChapter = next;
+          _currentPosition = 0;
+        });
+      }
+      await _playChapter(next, 0);
+    } catch (e) {
+      debugPrint('_nextChapter error: $e');
     }
-    await _handler!.skipToNext();
-    await _refreshCurrentChapter();
   }
 
   Future<void> _prevChapter() async {
-    if (_handler == null) {
-      _showAudioNotAvailable();
-      return;
+    if (_currentChapter == null) return;
+    try {
+      final prevIdx = _currentChapter!.chapterIndex - 1;
+      if (prevIdx < 0) return;
+      final prev = await DatabaseHelper.instance.getChapterByIndex(
+        widget.book.id!,
+        prevIdx,
+      );
+      if (prev == null) return;
+      if (mounted) {
+        setState(() {
+          _currentChapter = prev;
+          _currentPosition = 0;
+        });
+      }
+      await _playChapter(prev, 0);
+    } catch (e) {
+      debugPrint('_prevChapter error: $e');
     }
-    await _handler!.skipToPrevious();
-    await _refreshCurrentChapter();
-  }
-
-  void _showAudioNotAvailable() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('音频服务不可用')),
-    );
   }
 
   void _showBookSettings() {
@@ -194,6 +222,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
   @override
   void dispose() {
+    _progressSub?.cancel();
+    _completionSub?.cancel();
+    TtsService.instance.stop();
     _textScrollController?.dispose();
     super.dispose();
   }
@@ -292,9 +323,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       children: [
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceVariant,
-          ),
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
           child: Row(
             children: [
               Text(chapter?.title ?? '加载中...', style: Theme.of(context).textTheme.titleSmall),
@@ -325,7 +354,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.surface,
-            border: Border(top: BorderSide(color: Theme.of(context).colorScheme.outline)),
+            border: Border(top: BorderSide(color: Theme.of(context).dividerColor)),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,

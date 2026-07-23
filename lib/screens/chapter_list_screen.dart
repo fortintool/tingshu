@@ -4,8 +4,7 @@ import '../models/book.dart';
 import '../models/chapter.dart';
 import '../models/reading_progress.dart';
 import '../database/database_helper.dart';
-import '../services/audio_handler.dart';
-import '../providers/audio_handler_provider.dart';
+import '../services/tts_service.dart';
 
 class ChapterListScreen extends ConsumerStatefulWidget {
   final Book book;
@@ -40,21 +39,16 @@ class _ChapterListScreenState extends ConsumerState<ChapterListScreen> {
   }
 
   Future<void> _selectChapter(Chapter chapter) async {
-    final handler = ref.read(audioHandlerProvider);
-    if (handler == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('音频服务不可用')),
-        );
-      }
-      return;
+    try {
+      await TtsService.instance.speak(
+        text: chapter.content,
+        bookId: widget.book.id!,
+        chapterId: chapter.id!,
+        chapterCharStart: chapter.charStart,
+      );
+    } catch (e) {
+      debugPrint('_selectChapter error: $e');
     }
-    await handler.playChapter(
-      book: widget.book,
-      chapter: chapter,
-      startOffset: 0,
-    );
-    handler.onPlaybackStart();
     if (mounted) {
       Navigator.pop(context);
     }

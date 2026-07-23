@@ -71,26 +71,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         children: [
           // 语音选择
           _SectionTitle(title: '发音人', subtitle: settings.defaultVoice ?? '系统默认'),
-          _loadingVoices
-              ? const Center(child: CircularProgressIndicator())
-              : _voices.isEmpty
-                  ? Row(
-                      children: [
-                        const Expanded(child: Text('无法获取语音列表')),
-                        TextButton.icon(
-                          onPressed: _loadVoices,
-                          icon: const Icon(Icons.refresh, size: 18),
-                          label: const Text('重试'),
-                        ),
-                      ],
-                    )
-                  : Card(
-                      child: ListTile(
-                        title: Text(_voiceDisplayName(settings.defaultVoice)),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () => _showVoicePicker(notifier, settings.defaultVoice),
-                      ),
-                    ),
+          Card(
+            child: ListTile(
+              title: Text(_voiceDisplayName(settings.defaultVoice)),
+              subtitle: _loadingVoices
+                  ? null
+                  : _voices.isEmpty
+                      ? const Text('当前设备使用系统默认发音人')
+                      : null,
+              trailing: _voices.isNotEmpty
+                  ? const Icon(Icons.chevron_right)
+                  : _loadingVoices
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      : null,
+              onTap: _voices.isNotEmpty
+                  ? () => _showVoicePicker(notifier, settings.defaultVoice)
+                  : null,
+            ),
+          ),
           const SizedBox(height: 24),
 
           // 语速
