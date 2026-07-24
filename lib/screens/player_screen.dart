@@ -211,7 +211,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
   void _onTextTap(int charOffset) {
     if (_currentChapter == null) return;
-    setState(() => _currentPosition = charOffset);
+    setState(() {
+      _currentPosition = charOffset;
+      _isPlaying = true;
+    });
     TtsService.instance.speak(
       text: _currentChapter!.content.substring(charOffset),
       bookId: widget.book.id!,

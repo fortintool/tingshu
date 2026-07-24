@@ -20,6 +20,7 @@ class TtsService {
   double _pitch = 1.0;
   int? _currentBookId;
   int? _currentChapterId;
+  String? _detectedLanguage;
 
   final StreamController<({int chapter, int book})> _progressController =
       StreamController<({int chapter, int book})>.broadcast();
@@ -31,36 +32,59 @@ class TtsService {
 
   bool _initialized = false;
 
-  /// 简化的初始化：只注册回调，不调用任何可能阻塞的平台方法
+  /// 初始化 TTS：设置语言、注册回调。
   Future<void> _ensureInit() async {
     if (_initialized) return;
 
-    // 注册回调（这些不会阻塞）
-    tts.setStartHandler(() {
-      debugPrint('TTS started');
-    });
-    tts.setProgressHandler((String text, int start, int end, String word) {
-      _currentCharPosition = end;
-      _progressController.add((
-        chapter: end,
-        book: _chapterCharStart + end,
-      ));
-    });
-    tts.setCompletionHandler(() {
-      debugPrint('TTS completed');
-      _completionController.add(null);
-    });
-    tts.setErrorHandler((msg) {
-      debugPrint('TTS error: $msg');
-      _completionController.add(null);
-    });
-    tts.setCancelHandler(() {
-      debugPrint('TTS cancelled');
-      _completionController.add(null);
-    });
+    try {
+      // 设置中文语言（不要 timeout，platform channel 的 timeout 不可靠）
+      try {
+        await tts.setLanguage('zh-CN');
+        _detectedLanguage = 'zh-CN';
+        debugPrint('TTS language set to zh-CN');
+      } catch (e) {
+        debugPrint('setLanguage zh-CN failed: $e');
+        // 尝试 zh-Hans-CN
+        try {
+          await tts.setLanguage('zh-Hans-CN');
+          _detectedLanguage = 'zh-Hans-CN';
+          debugPrint('TTS language set to zh-Hans-CN');
+        } catch (_) {}
+      }
 
-    _initialized = true;
-    debugPrint('TTS handlers registered');
+      try {
+        await tts.awaitSpeakCompletion(true);
+      } catch (_) {}
+
+      // 注册回调
+      tts.setStartHandler(() {
+        debugPrint('TTS started');
+      });
+      tts.setProgressHandler((String text, int start, int end, String word) {
+        _currentCharPosition = end;
+        _progressController.add((
+          chapter: end,
+          book: _chapterCharStart + end,
+        ));
+      });
+      tts.setCompletionHandler(() {
+        debugPrint('TTS completed');
+        _completionController.add(null);
+      });
+      tts.setErrorHandler((msg) {
+        debugPrint('TTS error: $msg');
+        _completionController.add(null);
+      });
+      tts.setCancelHandler(() {
+        debugPrint('TTS cancelled');
+        _completionController.add(null);
+      });
+
+      _initialized = true;
+      debugPrint('TTS initialized successfully');
+    } catch (e) {
+      debugPrint('TTS init failed: $e');
+    }
   }
 
   /// 应用设置（单本书覆盖全局）
@@ -75,7 +99,16 @@ class TtsService {
     final speed = bookOverride?.speed ?? global.defaultSpeed;
     final pitch = bookOverride?.pitch ?? global.defaultPitch;
 
-    // 设置语速和音调（不设置语言和发音人，让系统默认处理）
+    // 设置发音人（如果有）
+    if (voice != null && voice.isNotEmpty) {
+      try {
+        await tts.setVoice({'name': voice, 'locale': _detectedLanguage ?? 'zh-CN'});
+      } catch (e) {
+        debugPrint('setVoice failed: $e');
+      }
+    }
+
+    // 设置语速和音调
     try {
       await tts.setSpeechRate(speed);
     } catch (e) {
@@ -130,7 +163,6 @@ class TtsService {
       _currentBookId = bookId;
       _currentChapterId = chapterId;
 
-      // 应用设置
       await _applySettings(bookId);
 
       final subText = startOffset > 0 && startOffset < text.length
@@ -142,7 +174,7 @@ class TtsService {
         return;
       }
 
-      debugPrint('TTS speaking ${subText.length} chars, offset=$startOffset');
+      debugPrint('TTS speaking ${subText.length} chars');
       await tts.speak(subText);
       debugPrint('TTS speak returned');
     } catch (e, st) {
