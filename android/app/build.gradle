@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace "com.example.tingshu"
-    compileSdkVersion 36
+    compileSdkVersion 35
     ndkVersion "26.1.10909125"
 
     compileOptions {
@@ -24,8 +24,8 @@ android {
 
     defaultConfig {
         applicationId "com.example.tingshu"
-        minSdkVersion 24
-        targetSdkVersion 36
+        minSdkVersion 21
+        targetSdkVersion 35
         versionCode 1
         versionName "1.0.0"
     }
