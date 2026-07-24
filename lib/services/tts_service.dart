@@ -20,7 +20,6 @@ class TtsService {
   double _pitch = 1.0;
   int? _currentBookId;
   int? _currentChapterId;
-  String? _detectedLanguage;
 
   final StreamController<({int chapter, int book})> _progressController =
       StreamController<({int chapter, int book})>.broadcast();
@@ -31,90 +30,15 @@ class TtsService {
   Stream<void> get completionStream => _completionController.stream;
 
   bool _initialized = false;
-  bool _initFailed = false;
 
+  /// 简化的初始化：只注册回调，不调用任何可能阻塞的平台方法
   Future<void> _ensureInit() async {
     if (_initialized) return;
-    if (_initFailed) return;
 
-    try {
-      // 先获取可用语言，找到最合适的中文语音
-      dynamic languages;
-      try {
-        languages = await tts.getLanguages.timeout(const Duration(seconds: 2));
-      } catch (_) {}
-
-      String? bestLang;
-      if (languages is List) {
-        for (final lang in languages) {
-          final l = lang.toString().toLowerCase();
-          if (l.startsWith('zh') || l.contains('chinese')) {
-            bestLang = lang.toString();
-            break;
-          }
-        }
-      }
-
-      // 先尝试设置检测到的中文语言，失败则用 zh-CN
-      if (bestLang != null) {
-        try {
-          await tts.setLanguage(bestLang).timeout(const Duration(seconds: 2));
-          _detectedLanguage = bestLang;
-        } catch (_) {
-          try {
-            await tts.setLanguage('zh-CN').timeout(const Duration(seconds: 2));
-            _detectedLanguage = 'zh-CN';
-          } catch (_) {}
-        }
-      } else {
-        try {
-          await tts.setLanguage('zh-CN').timeout(const Duration(seconds: 2));
-          _detectedLanguage = 'zh-CN';
-        } catch (_) {}
-      }
-
-      try {
-        await tts.awaitSpeakCompletion(true).timeout(const Duration(seconds: 1));
-      } catch (_) {}
-      try {
-        await tts.setSpeechRate(1.0).timeout(const Duration(seconds: 1));
-      } catch (_) {}
-      try {
-        await tts.setPitch(1.0).timeout(const Duration(seconds: 1));
-      } catch (_) {}
-
-      // 注册回调
-      tts.setStartHandler(() {
-        _onStart();
-      });
-      tts.setProgressHandler((String text, int start, int end, String word) {
-        _currentCharPosition = end;
-        _progressController.add((
-          chapter: end,
-          book: _chapterCharStart + end,
-        ));
-      });
-      tts.setCompletionHandler(() {
-        _completionController.add(null);
-      });
-      tts.setErrorHandler((msg) {
-        debugPrint('TTS error: $msg');
-        _completionController.add(null);
-      });
-      tts.setCancelHandler(() {
-        _completionController.add(null);
-      });
-
-      _initialized = true;
-      debugPrint('TTS initialized, language: $_detectedLanguage');
-    } catch (e) {
-      _initFailed = true;
-      debugPrint('TTS init failed: $e');
-    }
-  }
-
-  void _onStart() {
-    // 播放开始时重置进度回调（某些设备需要在 start 后重新设置）
+    // 注册回调（这些不会阻塞）
+    tts.setStartHandler(() {
+      debugPrint('TTS started');
+    });
     tts.setProgressHandler((String text, int start, int end, String word) {
       _currentCharPosition = end;
       _progressController.add((
@@ -122,13 +46,28 @@ class TtsService {
         book: _chapterCharStart + end,
       ));
     });
+    tts.setCompletionHandler(() {
+      debugPrint('TTS completed');
+      _completionController.add(null);
+    });
+    tts.setErrorHandler((msg) {
+      debugPrint('TTS error: $msg');
+      _completionController.add(null);
+    });
+    tts.setCancelHandler(() {
+      debugPrint('TTS cancelled');
+      _completionController.add(null);
+    });
+
+    _initialized = true;
+    debugPrint('TTS handlers registered');
   }
 
   /// 应用设置（单本书覆盖全局）
   Future<void> _applySettings(int? bookId) async {
     final global = await _db.getUserSettings();
     BookSettings? bookOverride;
-    if (bookId != null) {
+    if (bookId != null && bookId > 0) {
       bookOverride = await _db.getBookSettings(bookId);
     }
 
@@ -136,19 +75,17 @@ class TtsService {
     final speed = bookOverride?.speed ?? global.defaultSpeed;
     final pitch = bookOverride?.pitch ?? global.defaultPitch;
 
+    // 设置语速和音调（不设置语言和发音人，让系统默认处理）
     try {
-      if (voice != null && voice.isNotEmpty) {
-        await tts.setVoice({'name': voice, 'locale': _detectedLanguage ?? 'zh-CN'}).timeout(const Duration(seconds: 2));
-      }
+      await tts.setSpeechRate(speed);
     } catch (e) {
-      debugPrint('setVoice failed: $e');
+      debugPrint('setSpeechRate error: $e');
     }
     try {
-      await tts.setSpeechRate(speed).timeout(const Duration(seconds: 1));
-    } catch (_) {}
-    try {
-      await tts.setPitch(pitch).timeout(const Duration(seconds: 1));
-    } catch (_) {}
+      await tts.setPitch(pitch);
+    } catch (e) {
+      debugPrint('setPitch error: $e');
+    }
 
     _voice = voice;
     _speed = speed;
@@ -158,10 +95,7 @@ class TtsService {
   /// 获取设备支持的语音列表
   Future<List<Map<String, String>>> getVoices() async {
     try {
-      final list = await tts.getVoices.timeout(
-        const Duration(seconds: 3),
-        onTimeout: () => <dynamic>[],
-      );
+      final list = await tts.getVoices;
       if (list is List) {
         return list
             .whereType<Map>()
@@ -174,9 +108,6 @@ class TtsService {
     return [];
   }
 
-  /// 获取检测到的语言
-  String? get detectedLanguage => _detectedLanguage;
-
   /// 朗读指定文本
   Future<void> speak({
     required String text,
@@ -187,7 +118,11 @@ class TtsService {
   }) async {
     try {
       await _ensureInit();
-      await stop();
+
+      // 先停止当前播放
+      try {
+        await tts.stop();
+      } catch (_) {}
 
       _currentText = text;
       _chapterCharStart = chapterCharStart;
@@ -195,6 +130,7 @@ class TtsService {
       _currentBookId = bookId;
       _currentChapterId = chapterId;
 
+      // 应用设置
       await _applySettings(bookId);
 
       final subText = startOffset > 0 && startOffset < text.length
@@ -206,7 +142,9 @@ class TtsService {
         return;
       }
 
-      await tts.speak(subText).timeout(const Duration(seconds: 5));
+      debugPrint('TTS speaking ${subText.length} chars, offset=$startOffset');
+      await tts.speak(subText);
+      debugPrint('TTS speak returned');
     } catch (e, st) {
       debugPrint('TTS speak error: $e\n$st');
       _completionController.add(null);
@@ -215,17 +153,16 @@ class TtsService {
 
   Future<void> pause() async {
     try {
-      await _ensureInit();
-      await tts.pause().timeout(const Duration(seconds: 2));
+      await tts.pause();
     } catch (e) {
       debugPrint('TTS pause error: $e');
     }
   }
 
   Future<void> resume() async {
+    if (_currentText.isEmpty) return;
     try {
-      await _ensureInit();
-      await tts.speak(_currentText.substring(_currentCharPosition)).timeout(const Duration(seconds: 5));
+      await tts.speak(_currentText.substring(_currentCharPosition));
     } catch (e) {
       debugPrint('TTS resume error: $e');
     }
@@ -233,8 +170,7 @@ class TtsService {
 
   Future<void> stop() async {
     try {
-      await _ensureInit();
-      await tts.stop().timeout(const Duration(seconds: 2));
+      await tts.stop();
     } catch (e) {
       debugPrint('TTS stop error: $e');
     }
